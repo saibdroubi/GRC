@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import {
   api,
+  type Action,
   type ControlWithStatus,
   type Framework,
   type FrameworkScore,
   type Gap,
   type Organization,
+  type User,
 } from "./api";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -42,6 +44,8 @@ function App() {
   const [score, setScore] = useState<FrameworkScore | null>(null);
   const [controls, setControls] = useState<ControlWithStatus[]>([]);
   const [gaps, setGaps] = useState<Gap[]>([]);
+  const [actions, setActions] = useState<Action[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -55,6 +59,11 @@ function App() {
       .catch((e) => setError(String(e)));
   }, []);
 
+  useEffect(() => {
+    if (!orgId) return;
+    api.listUsers(orgId).then(setUsers).catch((e) => setError(String(e)));
+  }, [orgId]);
+
   const refresh = () => {
     if (!orgId || !frameworkId) return;
     api.getFrameworkScore(frameworkId, orgId).then(setScore).catch((e) => setError(String(e)));
@@ -63,6 +72,7 @@ function App() {
       .then(setControls)
       .catch((e) => setError(String(e)));
     api.listGaps(orgId).then(setGaps).catch((e) => setError(String(e)));
+    api.listActions(orgId).then(setActions).catch((e) => setError(String(e)));
   };
 
   useEffect(refresh, [orgId, frameworkId]);
@@ -70,6 +80,33 @@ function App() {
   const handleGapStatus = async (gapId: string, newStatus: string) => {
     await api.updateGapStatus(gapId, newStatus);
     refresh();
+  };
+
+  const adminUserId = users.find((u) => u.role === "admin")?.id ?? users[0]?.id;
+
+  const handlePropose = async (gapId: string) => {
+    await api.proposeAction(gapId);
+    refresh();
+  };
+
+  const handleApprove = async (actionId: string) => {
+    if (!adminUserId) return;
+    await api.approveAction(actionId, adminUserId);
+    refresh();
+  };
+
+  const handleReject = async (actionId: string) => {
+    if (!adminUserId) return;
+    await api.rejectAction(actionId, adminUserId);
+    refresh();
+  };
+
+  const latestActionForGap = (gapId: string): Action | undefined => {
+    const forGap = actions.filter((a) => a.gap_id === gapId);
+    return (
+      forGap.find((a) => a.status === "pending_approval") ??
+      forGap[forGap.length - 1]
+    );
   };
 
   return (
@@ -156,36 +193,70 @@ function App() {
                 <th>Severity</th>
                 <th>Description</th>
                 <th>Status</th>
+                <th>Remediation</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {gaps.map((g) => (
-                <tr key={g.id}>
-                  <td>
-                    <span
-                      className="badge"
-                      style={{ backgroundColor: SEVERITY_COLORS[g.severity] }}
-                    >
-                      {g.severity}
-                    </span>
-                  </td>
-                  <td>{g.description}</td>
-                  <td>{g.status}</td>
-                  <td>
-                    {g.status === "open" && (
-                      <>
-                        <button onClick={() => handleGapStatus(g.id, "in_progress")}>
-                          Start
-                        </button>
-                        <button onClick={() => handleGapStatus(g.id, "risk_accepted")}>
-                          Accept risk
-                        </button>
-                      </>
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {gaps.map((g) => {
+                const action = latestActionForGap(g.id);
+                return (
+                  <tr key={g.id}>
+                    <td>
+                      <span
+                        className="badge"
+                        style={{ backgroundColor: SEVERITY_COLORS[g.severity] }}
+                      >
+                        {g.severity}
+                      </span>
+                    </td>
+                    <td>{g.description}</td>
+                    <td>{g.status}</td>
+                    <td>
+                      {action ? (
+                        <div className="action-cell">
+                          <code>
+                            {action.adapter_type}.{action.action_type}
+                          </code>
+                          <span className={`badge action-status-${action.status}`}>
+                            {action.status.replace("_", " ")}
+                          </span>
+                          {typeof action.parameters?.rationale === "string" && (
+                            <p className="rationale">{action.parameters.rationale}</p>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="empty">No proposal yet</span>
+                      )}
+                    </td>
+                    <td>
+                      {(g.status === "open" || g.status === "in_progress") && (
+                        <>
+                          {g.status === "open" && (
+                            <button onClick={() => handleGapStatus(g.id, "in_progress")}>
+                              Start
+                            </button>
+                          )}
+                          <button onClick={() => handleGapStatus(g.id, "risk_accepted")}>
+                            Accept risk
+                          </button>
+                          {(!action || action.status === "rejected" || action.status === "failed") && (
+                            <button onClick={() => handlePropose(g.id)}>Propose fix</button>
+                          )}
+                          {action?.status === "pending_approval" && (
+                            <>
+                              <button onClick={() => handleApprove(action.id)}>
+                                Approve &amp; execute
+                              </button>
+                              <button onClick={() => handleReject(action.id)}>Reject</button>
+                            </>
+                          )}
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}

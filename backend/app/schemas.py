@@ -85,6 +85,21 @@ class ControlWithStatusOut(BaseModel):
     gap_description: str | None = None
 
 
+class ActionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    gap_id: uuid.UUID
+    adapter_type: str
+    action_type: str
+    parameters: dict
+    status: str
+    proposed_by: str
+    approved_by_user_id: uuid.UUID | None = None
+    executed_at: datetime | None = None
+    result: dict
+
+
 class FrameworkScoreOut(BaseModel):
     framework_id: uuid.UUID
     framework_name: str

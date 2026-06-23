@@ -15,8 +15,21 @@ from app import models
 def run() -> None:
     db = SessionLocal()
     try:
+        if db.query(models.Organization).first():
+            print("Seed data already present, skipping.")
+            return
+
         org = models.Organization(name="Dev Org", deployment_mode="cloud")
         db.add(org)
+        db.flush()
+
+        admin = models.User(
+            organization_id=org.id,
+            name="Dev Admin",
+            email="admin@example.com",
+            role="admin",
+        )
+        db.add(admin)
 
         framework = models.Framework(
             name="PCI DSS",
@@ -88,7 +101,10 @@ def run() -> None:
                 )
 
         db.commit()
-        print(f"Seeded organization {org.id} and framework {framework.id} ({framework.name} {framework.version})")
+        print(
+            f"Seeded organization {org.id}, admin user {admin.id}, "
+            f"and framework {framework.id} ({framework.name} {framework.version})"
+        )
     finally:
         db.close()
 

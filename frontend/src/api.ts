@@ -48,8 +48,34 @@ export interface Gap {
   status: string;
 }
 
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+}
+
+export interface Action {
+  id: string;
+  gap_id: string;
+  adapter_type: string;
+  action_type: string;
+  parameters: Record<string, unknown>;
+  status: string;
+  proposed_by: string;
+  approved_by_user_id: string | null;
+  executed_at: string | null;
+  result: Record<string, unknown>;
+}
+
 async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`);
+  if (!res.ok) throw new Error(`${path} failed: ${res.status}`);
+  return res.json();
+}
+
+async function postJson<T>(path: string): Promise<T> {
+  const res = await fetch(`${BASE_URL}${path}`, { method: "POST" });
   if (!res.ok) throw new Error(`${path} failed: ${res.status}`);
   return res.json();
 }
@@ -75,4 +101,14 @@ export const api = {
     if (!res.ok) throw new Error(`update gap failed: ${res.status}`);
     return res.json();
   },
+  listUsers: (organizationId: string) =>
+    getJson<User[]>(`/users?organization_id=${organizationId}`),
+  listActions: (organizationId: string) =>
+    getJson<Action[]>(`/actions?organization_id=${organizationId}`),
+  proposeAction: (gapId: string) =>
+    postJson<Action>(`/gaps/${gapId}/actions`),
+  approveAction: (actionId: string, userId: string) =>
+    postJson<Action>(`/actions/${actionId}/approve?user_id=${userId}`),
+  rejectAction: (actionId: string, userId: string) =>
+    postJson<Action>(`/actions/${actionId}/reject?user_id=${userId}`),
 };

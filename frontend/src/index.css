@@ -1,0 +1,133 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font: 15px/1.5 system-ui, "Segoe UI", Roboto, sans-serif;
+  color: #1f2328;
+  background: #f6f8fa;
+}
+
+.page {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 32px 24px 64px;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+h1 {
+  font-size: 22px;
+  margin: 0;
+}
+
+h2 {
+  font-size: 16px;
+  margin: 32px 0 12px;
+}
+
+.selectors {
+  display: flex;
+  gap: 16px;
+}
+
+.selectors label {
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  color: #57606a;
+  gap: 4px;
+}
+
+select {
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #d0d7de;
+}
+
+.score-card {
+  background: #fff;
+  border: 1px solid #d0d7de;
+  border-radius: 8px;
+  padding: 20px;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.score-pct {
+  font-size: 40px;
+  font-weight: 700;
+}
+
+.score-breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 13px;
+  color: #57606a;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  border: 1px solid #d0d7de;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+th, td {
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e5e8eb;
+  font-size: 13px;
+  vertical-align: top;
+}
+
+th {
+  background: #f6f8fa;
+  font-weight: 600;
+  color: #57606a;
+}
+
+tr:last-child td {
+  border-bottom: none;
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 12px;
+  text-transform: capitalize;
+}
+
+button {
+  margin-right: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+  border: 1px solid #d0d7de;
+  background: #fff;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #f3f4f6;
+}
+
+.error {
+  color: #cf222e;
+}
+
+.empty {
+  color: #57606a;
+}

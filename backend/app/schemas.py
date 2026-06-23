@@ -72,6 +72,19 @@ class ControlScoreOut(BaseModel):
     last_evaluated_at: datetime
 
 
+class ControlWithStatusOut(BaseModel):
+    id: uuid.UUID
+    ref_code: str
+    requirement_title: str
+    description: str
+    status: str
+    confidence: float
+    gap_id: uuid.UUID | None = None
+    gap_severity: str | None = None
+    gap_status: str | None = None
+    gap_description: str | None = None
+
+
 class FrameworkScoreOut(BaseModel):
     framework_id: uuid.UUID
     framework_name: str

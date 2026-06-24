@@ -30,6 +30,28 @@ psql -d grc_dev -c "CREATE EXTENSION IF NOT EXISTS vector;"
 - `GET /evidence?organization_id=...`
 - `GET /gaps?organization_id=...&status=open`
 - `PATCH /gaps/{id}?new_status=...`
+- `POST /gaps/{id}/actions` — AI proposes a remediation action (`pending_approval`)
+- `POST /actions/{id}/approve?user_id=...` / `POST /actions/{id}/reject?user_id=...`
+- `GET /integrations/m365/status?organization_id=...`
+- `POST /integrations/m365/sync?organization_id=...&control_id=...` — pulls live
+  Conditional Access policies from Microsoft Graph and records MFA-enforcement
+  evidence against the given control
+
+## Microsoft 365 / Entra ID integration
+
+Read-only for now (no write/remediation calls). Requires an existing Entra ID
+app registration with the **application** permission `Policy.Read.All`,
+admin-consented in your tenant:
+
+1. Azure portal → Entra ID → App registrations → your app → API permissions
+   → Add a permission → Microsoft Graph → Application permissions →
+   `Policy.Read.All` → Grant admin consent.
+2. Certificates & secrets → create a client secret.
+3. Fill `M365_TENANT_ID`, `M365_CLIENT_ID`, `M365_CLIENT_SECRET` in `.env`
+   (directory/tenant ID, application/client ID, and the secret value).
+4. Restart the backend. The dashboard's Integrations panel will show
+   "configured" and the MFA control will get a "Sync from M365" button that
+   pulls live Conditional Access policies and judges org-wide MFA enforcement.
 
 ## Notes
 

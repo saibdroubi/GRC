@@ -6,9 +6,14 @@ import {
   type Framework,
   type FrameworkScore,
   type Gap,
+  type M365Status,
   type Organization,
   type User,
 } from "./api";
+
+const MFA_KEYWORDS = ["multi-factor", "mfa", "conditional access"];
+const isMfaControl = (c: ControlWithStatus) =>
+  MFA_KEYWORDS.some((k) => c.description.toLowerCase().includes(k));
 
 const STATUS_COLORS: Record<string, string> = {
   met: "#1a7f37",
@@ -46,7 +51,9 @@ function App() {
   const [gaps, setGaps] = useState<Gap[]>([]);
   const [actions, setActions] = useState<Action[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [m365Status, setM365Status] = useState<M365Status | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([api.listOrganizations(), api.listFrameworks()])
@@ -62,6 +69,7 @@ function App() {
   useEffect(() => {
     if (!orgId) return;
     api.listUsers(orgId).then(setUsers).catch((e) => setError(String(e)));
+    api.getM365Status(orgId).then(setM365Status).catch((e) => setError(String(e)));
   }, [orgId]);
 
   const refresh = () => {
@@ -109,6 +117,19 @@ function App() {
     );
   };
 
+  const handleSyncM365 = async (controlId: string) => {
+    setSyncMessage(null);
+    setError(null);
+    try {
+      await api.syncM365Mfa(orgId, controlId);
+      setSyncMessage("Synced live Conditional Access data from Microsoft 365.");
+      api.getM365Status(orgId).then(setM365Status);
+      refresh();
+    } catch (e) {
+      setError(String((e as Error).message ?? e));
+    }
+  };
+
   return (
     <div className="page">
       <header>
@@ -141,6 +162,33 @@ function App() {
       </header>
 
       {error && <p className="error">{error}</p>}
+      {syncMessage && <p className="success">{syncMessage}</p>}
+
+      <section className="integrations">
+        <h2>Integrations</h2>
+        <div className="integration-row">
+          <span className="integration-name">Microsoft 365 / Entra ID</span>
+          {m365Status?.configured ? (
+            <span className="badge" style={{ backgroundColor: "#1a7f37" }}>
+              configured
+            </span>
+          ) : (
+            <span className="badge" style={{ backgroundColor: "#9198a1" }}>
+              not configured
+            </span>
+          )}
+          <span className="empty">
+            {m365Status?.last_sync_at
+              ? `Last synced ${new Date(m365Status.last_sync_at).toLocaleString()}`
+              : "Never synced"}
+          </span>
+        </div>
+        {!m365Status?.configured && (
+          <p className="empty">
+            Set M365_TENANT_ID, M365_CLIENT_ID, and M365_CLIENT_SECRET in backend/.env to enable.
+          </p>
+        )}
+      </section>
 
       {score && (
         <section className="score-card">
@@ -165,6 +213,7 @@ function App() {
               <th>Requirement</th>
               <th>Control</th>
               <th>Status</th>
+              <th>Live source</th>
             </tr>
           </thead>
           <tbody>
@@ -175,6 +224,21 @@ function App() {
                 <td>{c.description}</td>
                 <td>
                   <StatusBadge status={c.status} />
+                </td>
+                <td>
+                  {isMfaControl(c) && (
+                    <button
+                      disabled={!m365Status?.configured}
+                      title={
+                        m365Status?.configured
+                          ? "Pull live Conditional Access policies from Microsoft Graph"
+                          : "Configure M365 credentials in backend/.env first"
+                      }
+                      onClick={() => handleSyncM365(c.id)}
+                    >
+                      Sync from M365
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}

@@ -100,6 +100,13 @@ class ActionOut(BaseModel):
     result: dict
 
 
+class M365StatusOut(BaseModel):
+    configured: bool
+    connection_id: uuid.UUID | None = None
+    status: str | None = None
+    last_sync_at: datetime | None = None
+
+
 class FrameworkScoreOut(BaseModel):
     framework_id: uuid.UUID
     framework_name: str

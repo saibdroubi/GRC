@@ -68,6 +68,13 @@ export interface Action {
   result: Record<string, unknown>;
 }
 
+export interface M365Status {
+  configured: boolean;
+  connection_id: string | null;
+  status: string | null;
+  last_sync_at: string | null;
+}
+
 async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`);
   if (!res.ok) throw new Error(`${path} failed: ${res.status}`);
@@ -76,7 +83,10 @@ async function getJson<T>(path: string): Promise<T> {
 
 async function postJson<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, { method: "POST" });
-  if (!res.ok) throw new Error(`${path} failed: ${res.status}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail ?? `${path} failed: ${res.status}`);
+  }
   return res.json();
 }
 
@@ -111,4 +121,10 @@ export const api = {
     postJson<Action>(`/actions/${actionId}/approve?user_id=${userId}`),
   rejectAction: (actionId: string, userId: string) =>
     postJson<Action>(`/actions/${actionId}/reject?user_id=${userId}`),
+  getM365Status: (organizationId: string) =>
+    getJson<M365Status>(`/integrations/m365/status?organization_id=${organizationId}`),
+  syncM365Mfa: (organizationId: string, controlId: string) =>
+    postJson<unknown>(
+      `/integrations/m365/sync?organization_id=${organizationId}&control_id=${controlId}`
+    ),
 };

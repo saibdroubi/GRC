@@ -60,6 +60,9 @@ psql -d grc_dev -c "CREATE EXTENSION IF NOT EXISTS vector;"
   `POST /integrations/{type}/sync?organization_id=&control_id=`
 - `POST /chat/sessions`, `GET /chat/sessions?organization_id=`,
   `GET /chat/sessions/{id}/messages`, `POST /chat/sessions/{id}/messages`
+- `POST /knowledge-base/documents`, `GET /knowledge-base/search?organization_id=&query=`
+- `POST /frameworks/ingest` (multipart: `name`, `version`, `file`),
+  `POST /frameworks/{id}/approve`
 
 ## Integrations
 
@@ -82,13 +85,34 @@ curl -X POST "http://localhost:8000/integrations/nessus/test?organization_id=<id
 Each vendor module's `permissions_help` (returned by `GET /integrations`)
 states exactly what credential/permission to generate on the vendor side.
 
+## Knowledge base
+
+`app/services/knowledge_base.py` distills every evidence submission/
+integration sync into a `KnowledgeBaseEntry` automatically (deterministic,
+no LLM call, works with no key configured) — this is what makes it grow on
+its own as integrations run, per the product vision. Manual notes/documents
+can also be fed in directly, optionally cleaned up by Claude first
+(`reformat: true`). Search uses pgvector cosine similarity when
+`VOYAGE_API_KEY` is set, falling back to Postgres `ILIKE` otherwise.
+
+## Real framework ingestion
+
+`POST /frameworks/ingest` accepts a PDF or `.txt` upload (e.g. the official
+PCI DSS document downloaded from the PCI Security Standards Council site)
+and has Claude extract Requirement/Control records **only from what's
+literally in the document** — the prompt explicitly forbids inferring or
+adding anything not present in the source text. The result lands as a
+`draft` Framework; review it, then `POST /frameworks/{id}/approve` before
+using it for real scoring.
+
+```bash
+curl -X POST http://localhost:8000/frameworks/ingest \
+  -F "name=PCI DSS" -F "version=4.0.1" -F "file=@/path/to/PCI-DSS-v4_0_1.pdf"
+```
+
 ## Notes
 
 - The seeded PCI DSS data in `app/seed.py` is a hand-written sample for
   development only — it has not been verified against the official current
-  PCI DSS text and must be replaced via the real Framework Library ingestion
-  pipeline (designed, not yet built — see the project plan) before being
-  used for actual compliance scoring.
-- The knowledge base and real PCI DSS document ingestion are designed but
-  not yet implemented; this pass covers the services-layer refactor, the
-  chat agent, and the generalized integration framework.
+  PCI DSS text. Replace it via the real ingestion pipeline above before
+  using this for actual compliance scoring against a customer.

@@ -14,42 +14,33 @@ import time
 
 import httpx
 
-from app.config import settings
+from app.integrations.registry import ConfigField, IntegrationDefinition, register
 
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 
-_token_cache: dict[str, object] = {"access_token": None, "expires_at": 0}
-
-
-class M365NotConfigured(Exception):
-    pass
+# Token cache keyed by tenant_id — fine for a single-process dev/small
+# deployment; a multi-worker deployment would want this in Postgres/Redis
+# instead, same caveat as any other in-memory cache here.
+_token_cache: dict[str, dict] = {}
 
 
 class M365RequestError(Exception):
     pass
 
 
-def _require_config() -> None:
-    if not (settings.m365_tenant_id and settings.m365_client_id and settings.m365_client_secret):
-        raise M365NotConfigured(
-            "M365 integration is not configured. Set M365_TENANT_ID, M365_CLIENT_ID, "
-            "and M365_CLIENT_SECRET in backend/.env."
-        )
+def _get_access_token(config: dict) -> str:
+    tenant_id = config["tenant_id"]
+    cached = _token_cache.get(tenant_id)
+    if cached and time.time() < cached["expires_at"] - 60:
+        return cached["access_token"]
 
-
-def get_access_token() -> str:
-    _require_config()
-
-    if _token_cache["access_token"] and time.time() < _token_cache["expires_at"] - 60:
-        return _token_cache["access_token"]  # type: ignore[return-value]
-
-    token_url = f"https://login.microsoftonline.com/{settings.m365_tenant_id}/oauth2/v2.0/token"
+    token_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
     response = httpx.post(
         token_url,
         data={
             "grant_type": "client_credentials",
-            "client_id": settings.m365_client_id,
-            "client_secret": settings.m365_client_secret,
+            "client_id": config["client_id"],
+            "client_secret": config["client_secret"],
             "scope": "https://graph.microsoft.com/.default",
         },
         timeout=15,
@@ -58,22 +49,22 @@ def get_access_token() -> str:
         raise M365RequestError(f"Failed to obtain Graph token: {response.status_code} {response.text}")
 
     data = response.json()
-    _token_cache["access_token"] = data["access_token"]
-    _token_cache["expires_at"] = time.time() + data.get("expires_in", 3600)
+    _token_cache[tenant_id] = {
+        "access_token": data["access_token"],
+        "expires_at": time.time() + data.get("expires_in", 3600),
+    }
     return data["access_token"]
 
 
-def list_conditional_access_policies() -> list[dict]:
-    token = get_access_token()
+def _list_conditional_access_policies(config: dict) -> list[dict]:
+    token = _get_access_token(config)
     response = httpx.get(
         f"{GRAPH_BASE}/identity/conditionalAccess/policies",
         headers={"Authorization": f"Bearer {token}"},
         timeout=15,
     )
     if response.status_code != 200:
-        raise M365RequestError(
-            f"Graph request failed: {response.status_code} {response.text}"
-        )
+        raise M365RequestError(f"Graph request failed: {response.status_code} {response.text}")
     return response.json().get("value", [])
 
 
@@ -87,11 +78,19 @@ def _policy_enforces_mfa_for_all(policy: dict) -> bool:
     return "mfa" in (controls.get("builtInControls") or [])
 
 
-def evaluate_mfa_enforcement() -> dict:
+def test_connection(config: dict) -> dict:
+    try:
+        _get_access_token(config)
+        return {"success": True, "message": "Obtained a Graph access token successfully."}
+    except M365RequestError as e:
+        return {"success": False, "message": str(e)}
+
+
+def collect_evidence(config: dict) -> dict:
     """Pull live Conditional Access policies and judge whether MFA is
     enforced for all users. Returns a dict shaped like the manual
     extracted_facts payload the /evidence endpoint already accepts."""
-    policies = list_conditional_access_policies()
+    policies = _list_conditional_access_policies(config)
 
     enforcing = [p for p in policies if _policy_enforces_mfa_for_all(p)]
     enabled_mfa_policies = [
@@ -102,9 +101,7 @@ def evaluate_mfa_enforcement() -> dict:
 
     if enforcing:
         status = "met"
-        notes = (
-            f"Conditional Access policy '{enforcing[0].get('displayName')}' enforces MFA for all users."
-        )
+        notes = f"Conditional Access policy '{enforcing[0].get('displayName')}' enforces MFA for all users."
     elif enabled_mfa_policies:
         status = "partial"
         names = ", ".join(p.get("displayName", "unnamed") for p in enabled_mfa_policies)
@@ -120,3 +117,24 @@ def evaluate_mfa_enforcement() -> dict:
         "policy_count": len(policies),
         "policy_names": [p.get("displayName") for p in policies],
     }
+
+
+register(
+    IntegrationDefinition(
+        type="m365",
+        display_name="Microsoft 365 / Entra ID",
+        adapter_type="m365",
+        fields=[
+            ConfigField("tenant_id", "Tenant ID", "text", "Entra ID directory (tenant) ID"),
+            ConfigField("client_id", "Client ID", "text", "App registration's application (client) ID"),
+            ConfigField("client_secret", "Client secret", "secret", "App registration client secret value"),
+        ],
+        permissions_help=(
+            "Entra ID app registration needs the application permission Policy.Read.All, "
+            "admin-consented. Azure portal -> Entra ID -> App registrations -> your app -> "
+            "API permissions -> Add a permission -> Microsoft Graph -> Application permissions."
+        ),
+        test_connection=test_connection,
+        collect_evidence=collect_evidence,
+    )
+)

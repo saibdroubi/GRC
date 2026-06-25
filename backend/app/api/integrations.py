@@ -1,82 +1,72 @@
 import uuid
-from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app import models, schemas
-from app.config import settings
 from app.database import get_db
-from app.evidence_pipeline import record_evidence
-from app.integrations import m365
+from app.errors import NotFoundError, ValidationError
+from app.services import integrations as integrations_service
 
-router = APIRouter(prefix="/integrations/m365", tags=["integrations"])
-
-
-def _get_or_create_connection(db: Session, organization_id: uuid.UUID) -> models.IntegrationConnection:
-    connection = (
-        db.query(models.IntegrationConnection)
-        .filter_by(organization_id=organization_id, adapter_type="m365")
-        .one_or_none()
-    )
-    if connection is None:
-        connection = models.IntegrationConnection(
-            organization_id=organization_id,
-            adapter_type="m365",
-            config={"tenant_id": settings.m365_tenant_id, "client_id": settings.m365_client_id},
-            status="active",
-        )
-        db.add(connection)
-        db.flush()
-    return connection
+router = APIRouter(prefix="/integrations", tags=["integrations"])
 
 
-@router.get("/status", response_model=schemas.M365StatusOut)
-def m365_status(organization_id: uuid.UUID, db: Session = Depends(get_db)):
-    configured = bool(settings.m365_tenant_id and settings.m365_client_id and settings.m365_client_secret)
-    connection = (
-        db.query(models.IntegrationConnection)
-        .filter_by(organization_id=organization_id, adapter_type="m365")
-        .one_or_none()
-    )
-    return schemas.M365StatusOut(
-        configured=configured,
-        connection_id=connection.id if connection else None,
-        status=connection.status if connection else None,
-        last_sync_at=connection.last_sync_at if connection else None,
-    )
+@router.get("")
+def list_integrations(organization_id: uuid.UUID, db: Session = Depends(get_db)):
+    return integrations_service.list_statuses(db, organization_id)
 
 
-@router.post("/sync", response_model=schemas.EvidenceOut)
-def sync_mfa_evidence(
-    organization_id: uuid.UUID, control_id: uuid.UUID, db: Session = Depends(get_db)
-):
-    """Pull live Conditional Access policies from Microsoft Graph and record
-    the resulting MFA-enforcement evidence against the given control."""
-    control = db.get(models.Control, control_id)
-    if control is None:
-        raise HTTPException(status_code=404, detail="Control not found")
-
-    connection = _get_or_create_connection(db, organization_id)
-
+@router.get("/{integration_type}")
+def get_integration_status(integration_type: str, organization_id: uuid.UUID, db: Session = Depends(get_db)):
     try:
-        facts = m365.evaluate_mfa_enforcement()
-    except m365.M365NotConfigured as e:
+        return integrations_service.get_status(db, organization_id, integration_type)
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
+
+@router.post("/{integration_type}/config")
+def configure_integration(
+    integration_type: str,
+    organization_id: uuid.UUID,
+    config: dict = Body(...),
+    db: Session = Depends(get_db),
+):
+    try:
+        return integrations_service.update_connection_config(db, organization_id, integration_type, config)
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
+
+@router.post("/{integration_type}/test")
+def test_integration(integration_type: str, organization_id: uuid.UUID, db: Session = Depends(get_db)):
+    try:
+        return integrations_service.test_connection(db, organization_id, integration_type)
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValidationError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    except m365.M365RequestError as e:
-        connection.status = "error"
-        db.commit()
-        raise HTTPException(status_code=502, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Connection test failed: {e}") from e
 
-    connection.status = "active"
-    connection.last_sync_at = datetime.now(timezone.utc)
-    db.flush()
 
-    return record_evidence(
-        db,
-        organization_id=organization_id,
-        evidence_type="api_response",
-        control_hints=[str(control_id)],
-        extracted_facts=facts,
-        connection_id=connection.id,
-    )
+@router.post("/{integration_type}/sync")
+def sync_integration(
+    integration_type: str,
+    organization_id: uuid.UUID,
+    control_id: uuid.UUID,
+    db: Session = Depends(get_db),
+):
+    try:
+        evidence = integrations_service.sync_evidence(db, organization_id, integration_type, control_id)
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Sync failed: {e}") from e
+
+    return {
+        "id": str(evidence.id),
+        "evidence_type": evidence.evidence_type,
+        "collected_at": evidence.collected_at,
+        "extracted_facts": evidence.extracted_facts,
+    }

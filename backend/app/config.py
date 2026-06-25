@@ -5,14 +5,14 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://saibdroubi@localhost:5432/grc_dev"
     anthropic_api_key: str = ""
 
-    # Entra ID (Azure AD) app registration used for the Microsoft 365 / Graph
-    # adapter. Client credentials (app-only) flow — read-only Graph scopes
-    # only for this first pass. The secret never touches the database; it
-    # lives here (.env) only, consistent with the on-prem connector model in
-    # docs/ARCHITECTURE.md.
-    m365_tenant_id: str = ""
-    m365_client_id: str = ""
-    m365_client_secret: str = ""
+    # Master key for encrypting IntegrationConnection config (credentials for
+    # M365, Nessus, Palo Alto, Burp, etc.) at rest in Postgres. Generate with:
+    # python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    secret_encryption_key: str = ""
+
+    # Embeddings provider for the knowledge base (pgvector-backed). Anthropic
+    # has no embeddings API; Voyage AI is its recommended partner.
+    voyage_api_key: str = ""
 
     class Config:
         env_file = ".env"

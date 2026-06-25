@@ -16,7 +16,7 @@ from sqlalchemy.sql import func
 
 from app.database import Base
 
-EMBEDDING_DIM = 1536
+EMBEDDING_DIM = 1024  # Voyage AI voyage-3 output dimension
 
 
 def uuid_pk() -> Mapped[uuid.UUID]:
@@ -97,13 +97,19 @@ class Control(Base):
 
 class IntegrationConnection(Base):
     __tablename__ = "integration_connections"
+    __table_args__ = (UniqueConstraint("organization_id", "integration_type"),)
 
     id: Mapped[uuid.UUID] = uuid_pk()
     organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"))
+    # Specific vendor, e.g. "m365" | "nessus" | "palo_alto" | "burp" — drives
+    # which IntegrationDefinition in app/integrations/registry.py applies.
+    integration_type: Mapped[str] = mapped_column(String, nullable=False)
+    # Broad category used for Action routing in app/adapters.py.
     adapter_type: Mapped[str] = mapped_column(
         Enum("ad", "edr", "m365", "vuln_scanner", "cloud", "itsm", name="adapter_type")
     )
-    config: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Fernet-encrypted JSON blob (see app/crypto.py) — never stored plaintext.
+    config_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(
         Enum("active", "error", "disabled", name="connection_status"), default="active"
     )

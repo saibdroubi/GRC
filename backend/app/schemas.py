@@ -100,13 +100,6 @@ class ActionOut(BaseModel):
     result: dict
 
 
-class M365StatusOut(BaseModel):
-    configured: bool
-    connection_id: uuid.UUID | None = None
-    status: str | None = None
-    last_sync_at: datetime | None = None
-
-
 class FrameworkScoreOut(BaseModel):
     framework_id: uuid.UUID
     framework_name: str
@@ -118,3 +111,31 @@ class FrameworkScoreOut(BaseModel):
     not_applicable: int
     unscored: int
     score_pct: float
+
+
+class ChatSessionIn(BaseModel):
+    organization_id: uuid.UUID
+    user_id: uuid.UUID
+
+
+class ChatSessionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    organization_id: uuid.UUID
+    user_id: uuid.UUID
+    created_at: datetime
+
+
+class ChatMessageIn(BaseModel):
+    content: str
+
+
+class ChatMessageOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    role: str
+    content: str
+    tool_calls: dict
+    created_at: datetime

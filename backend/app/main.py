@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import actions, evidence, frameworks, gaps, integrations, organizations, users
+from app.api import actions, chat, evidence, frameworks, gaps, integrations, organizations, users
 
 app = FastAPI(title="GRC Automation Platform")
 
@@ -19,6 +19,7 @@ app.include_router(organizations.router)
 app.include_router(actions.router)
 app.include_router(users.router)
 app.include_router(integrations.router)
+app.include_router(chat.router)
 
 
 @app.get("/health")

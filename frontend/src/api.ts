@@ -68,11 +68,28 @@ export interface Action {
   result: Record<string, unknown>;
 }
 
-export interface M365Status {
+export interface IntegrationStatus {
+  type: string;
+  display_name: string;
   configured: boolean;
-  connection_id: string | null;
+  missing_fields: string[];
   status: string | null;
   last_sync_at: string | null;
+}
+
+export interface ChatSession {
+  id: string;
+  organization_id: string;
+  user_id: string;
+  created_at: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  role: "user" | "assistant" | "tool";
+  content: string;
+  tool_calls: Record<string, unknown>;
+  created_at: string;
 }
 
 async function getJson<T>(path: string): Promise<T> {
@@ -81,11 +98,15 @@ async function getJson<T>(path: string): Promise<T> {
   return res.json();
 }
 
-async function postJson<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, { method: "POST" });
+async function postJson<T>(path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method: "POST",
+    headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
   if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    throw new Error(body?.detail ?? `${path} failed: ${res.status}`);
+    const errBody = await res.json().catch(() => null);
+    throw new Error(errBody?.detail ?? `${path} failed: ${res.status}`);
   }
   return res.json();
 }
@@ -121,10 +142,18 @@ export const api = {
     postJson<Action>(`/actions/${actionId}/approve?user_id=${userId}`),
   rejectAction: (actionId: string, userId: string) =>
     postJson<Action>(`/actions/${actionId}/reject?user_id=${userId}`),
-  getM365Status: (organizationId: string) =>
-    getJson<M365Status>(`/integrations/m365/status?organization_id=${organizationId}`),
-  syncM365Mfa: (organizationId: string, controlId: string) =>
+  listIntegrations: (organizationId: string) =>
+    getJson<IntegrationStatus[]>(`/integrations?organization_id=${organizationId}`),
+  syncIntegrationEvidence: (organizationId: string, type: string, controlId: string) =>
     postJson<unknown>(
-      `/integrations/m365/sync?organization_id=${organizationId}&control_id=${controlId}`
+      `/integrations/${type}/sync?organization_id=${organizationId}&control_id=${controlId}`
     ),
+  createChatSession: (organizationId: string, userId: string) =>
+    postJson<ChatSession>("/chat/sessions", { organization_id: organizationId, user_id: userId }),
+  listChatSessions: (organizationId: string) =>
+    getJson<ChatSession[]>(`/chat/sessions?organization_id=${organizationId}`),
+  listChatMessages: (sessionId: string) =>
+    getJson<ChatMessage[]>(`/chat/sessions/${sessionId}/messages`),
+  postChatMessage: (sessionId: string, content: string) =>
+    postJson<ChatMessage>(`/chat/sessions/${sessionId}/messages`, { content }),
 };

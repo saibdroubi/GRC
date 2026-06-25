@@ -1,15 +1,19 @@
 # Backend
 
 FastAPI service implementing the Framework Library, Evidence Collector,
-Scoring & Gap engine, and a Claude-backed evidence analyzer, per
-[docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md).
+Scoring & Gap engine, a Claude-backed evidence analyzer, a generalized
+integration framework, and a chat agent that can do anything the REST
+API/dashboard can — per [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md).
 
 ## Setup
 
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-cp .env.example .env   # fill in ANTHROPIC_API_KEY, adjust DATABASE_URL
+cp .env.example .env
+# Fill in ANTHROPIC_API_KEY (enables the chat agent + AI-generated remediation
+# proposals/evidence analysis) and SECRET_ENCRYPTION_KEY (required — encrypts
+# integration credentials at rest; generate with the command in .env.example).
 
 # requires Postgres with the pgvector extension available
 createdb grc_dev
@@ -20,42 +24,71 @@ psql -d grc_dev -c "CREATE EXTENSION IF NOT EXISTS vector;"
 .venv/bin/uvicorn app.main:app --reload
 ```
 
-## Endpoints
+## Architecture
 
-- `GET /frameworks` / `GET /frameworks/{id}/requirements` / `GET /frameworks/{id}/controls`
-- `GET /frameworks/{id}/score?organization_id=...` — rolled-up framework score
-- `POST /evidence` — submit evidence; if `extracted_facts.status` is set it's
-  trusted, otherwise Claude evaluates the evidence against each control in
-  `control_hints` and a Finding/ControlScore/Gap are created or updated.
-- `GET /evidence?organization_id=...`
-- `GET /gaps?organization_id=...&status=open`
-- `PATCH /gaps/{id}?new_status=...`
-- `POST /gaps/{id}/actions` — AI proposes a remediation action (`pending_approval`)
-- `POST /actions/{id}/approve?user_id=...` / `POST /actions/{id}/reject?user_id=...`
-- `GET /integrations/m365/status?organization_id=...`
-- `POST /integrations/m365/sync?organization_id=...&control_id=...` — pulls live
-  Conditional Access policies from Microsoft Graph and records MFA-enforcement
-  evidence against the given control
+- `app/services/*` — the business logic (frameworks, gaps, actions,
+  integrations). Both the REST routers (`app/api/*`) and the chat agent
+  (`app/chat_agent.py`) call these same functions, so chat and the dashboard
+  can never drift out of sync.
+- `app/integrations/registry.py` — pluggable integration vendors. Each vendor
+  module (`m365.py`, `nessus.py`, `palo_alto.py`, `burp.py`) registers a
+  config schema, a `test_connection`, and (where implemented) a
+  `collect_evidence`. Adding a new vendor means writing one module like
+  those, nothing else changes.
+- `app/crypto.py` — integration credentials are encrypted at rest
+  (`IntegrationConnection.config_ciphertext`) with a master key
+  (`SECRET_ENCRYPTION_KEY`), not stored in `.env` — this is what lets the
+  chat agent actually configure an integration instead of just telling you
+  which env var to hand-edit.
+- `app/chat_agent.py` — Claude tool-use loop over the service layer. Two
+  things are enforced in code, not just prompting: approve/reject actions
+  always use the chat session's own `user_id` (the model can't pick a
+  different approver), and every tool is scoped to the session's
+  `organization_id` (the model can't query/act on another org).
 
-## Microsoft 365 / Entra ID integration
+## Key endpoints
 
-Read-only for now (no write/remediation calls). Requires an existing Entra ID
-app registration with the **application** permission `Policy.Read.All`,
-admin-consented in your tenant:
+- `GET /frameworks`, `GET /frameworks/{id}/controls-with-status?organization_id=`,
+  `GET /frameworks/{id}/score?organization_id=`
+- `POST /evidence`, `GET /evidence?organization_id=`
+- `GET /gaps?organization_id=`, `PATCH /gaps/{id}?new_status=`
+- `POST /gaps/{id}/actions`, `POST /actions/{id}/approve?user_id=`,
+  `POST /actions/{id}/reject?user_id=`
+- `GET /integrations?organization_id=` — status of every registered vendor
+- `POST /integrations/{type}/config?organization_id=` (body: partial config
+  fields), `POST /integrations/{type}/test?organization_id=`,
+  `POST /integrations/{type}/sync?organization_id=&control_id=`
+- `POST /chat/sessions`, `GET /chat/sessions?organization_id=`,
+  `GET /chat/sessions/{id}/messages`, `POST /chat/sessions/{id}/messages`
 
-1. Azure portal → Entra ID → App registrations → your app → API permissions
-   → Add a permission → Microsoft Graph → Application permissions →
-   `Policy.Read.All` → Grant admin consent.
-2. Certificates & secrets → create a client secret.
-3. Fill `M365_TENANT_ID`, `M365_CLIENT_ID`, `M365_CLIENT_SECRET` in `.env`
-   (directory/tenant ID, application/client ID, and the secret value).
-4. Restart the backend. The dashboard's Integrations panel will show
-   "configured" and the MFA control will get a "Sync from M365" button that
-   pulls live Conditional Access policies and judges org-wide MFA enforcement.
+## Integrations
+
+Currently registered: **m365** (read-only, evidence collection implemented —
+Conditional Access/MFA), **nessus** (read-only, evidence collection
+implemented — latest scan severity counts), **palo_alto** and **burp**
+(connection setup/testing implemented; evidence collection intentionally
+TODO — see the docstring in each module).
+
+Configure any of them either via chat ("let's integrate our Nessus scanner")
+or directly:
+
+```bash
+curl -X POST "http://localhost:8000/integrations/nessus/config?organization_id=<id>" \
+  -H "Content-Type: application/json" \
+  -d '{"base_url": "https://cloud.tenable.com", "access_key": "...", "secret_key": "..."}'
+curl -X POST "http://localhost:8000/integrations/nessus/test?organization_id=<id>"
+```
+
+Each vendor module's `permissions_help` (returned by `GET /integrations`)
+states exactly what credential/permission to generate on the vendor side.
 
 ## Notes
 
 - The seeded PCI DSS data in `app/seed.py` is a hand-written sample for
   development only — it has not been verified against the official current
   PCI DSS text and must be replaced via the real Framework Library ingestion
-  pipeline before being used for actual compliance scoring.
+  pipeline (designed, not yet built — see the project plan) before being
+  used for actual compliance scoring.
+- The knowledge base and real PCI DSS document ingestion are designed but
+  not yet implemented; this pass covers the services-layer refactor, the
+  chat agent, and the generalized integration framework.

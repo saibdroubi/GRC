@@ -259,3 +259,22 @@ class ChatMessage(Base):
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
     session: Mapped["ChatSession"] = relationship(back_populates="messages")
+
+
+class KnowledgeBaseEntry(Base):
+    """Long-term, growing memory for an org: distilled facts from evidence/
+    integration syncs, directly-fed documents, and explicit chat saves."""
+
+    __tablename__ = "knowledge_base_entries"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"))
+    source_type: Mapped[str] = mapped_column(
+        Enum("integration_sync", "document", "evidence", "chat", name="kb_source_type")
+    )
+    source_ref: Mapped[str | None] = mapped_column(String, nullable=True)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
+    metadata_: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())

@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app import ai_engine, models
 from app.scoring import apply_finding
+from app.services import knowledge_base
 
 
 def record_evidence(
@@ -56,6 +57,8 @@ def record_evidence(
         db.add(finding)
         db.flush()
         apply_finding(db, organization_id, finding)
+
+    knowledge_base.ingest_from_evidence(db, evidence)
 
     db.commit()
     db.refresh(evidence)

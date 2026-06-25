@@ -139,3 +139,21 @@ class ChatMessageOut(BaseModel):
     content: str
     tool_calls: dict
     created_at: datetime
+
+
+class KnowledgeBaseDocumentIn(BaseModel):
+    organization_id: uuid.UUID
+    title: str
+    content: str
+    reformat: bool = False
+
+
+class KnowledgeBaseEntryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    source_type: str
+    source_ref: str | None = None
+    title: str
+    content: str
+    created_at: datetime

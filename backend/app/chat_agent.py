@@ -30,6 +30,7 @@ from app.services import actions as actions_service
 from app.services import frameworks as frameworks_service
 from app.services import gaps as gaps_service
 from app.services import integrations as integrations_service
+from app.services import knowledge_base as kb_service
 
 MODEL = "claude-sonnet-4-6"
 
@@ -50,6 +51,9 @@ up front if get_integration_status hasn't already been called.
 - Be transparent about where information comes from (which control, which integration, AI \
 heuristic vs configured AI analysis) — never present a guess as a verified fact.
 - If a tool returns is_error, explain the problem in plain language; don't retry blindly.
+- Use search_knowledge_base when answering questions that might be informed by past evidence, \
+syncs, or notes you don't already have in this conversation. Only call save_to_knowledge_base \
+when the human explicitly asks you to remember/save something — never silently log every message.
 
 Be concise. This is an admin operating a compliance program, not a chat companion."""
 
@@ -209,6 +213,30 @@ TOOL_DEFINITIONS = [
             "required": ["integration_type", "control_id"],
         },
     },
+    {
+        "name": "search_knowledge_base",
+        "description": "Search this org's accumulated knowledge base (facts distilled from evidence, integration syncs, and saved notes) for relevant context.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "top_k": {"type": "integer"},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "save_to_knowledge_base",
+        "description": "Explicitly save a fact/note the human asked you to remember into the knowledge base. Only call this when the human clearly asked you to remember/save something, not for every message.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "content": {"type": "string"},
+            },
+            "required": ["title", "content"],
+        },
+    },
 ]
 
 
@@ -262,6 +290,16 @@ def _dispatch(db: Session, session: models.ChatSession, name: str, tool_input: d
     if name == "sync_integration_evidence":
         return integrations_service.sync_evidence(
             db, org_id, tool_input["integration_type"], uuid.UUID(tool_input["control_id"])
+        )
+    if name == "search_knowledge_base":
+        return kb_service.search(db, org_id, tool_input["query"], tool_input.get("top_k", 5))
+    if name == "save_to_knowledge_base":
+        return kb_service.ingest_document(
+            db,
+            org_id,
+            title=tool_input["title"],
+            content=tool_input["content"],
+            source_type="chat",
         )
 
     raise ValidationError(f"Unknown tool '{name}'")

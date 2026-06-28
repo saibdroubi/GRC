@@ -78,8 +78,12 @@ and [backend/README.md](backend/README.md) for the service layer):
   chat agent. Still deferred: OIDC/SSO for enterprise buyers, email verification,
   password reset, multi-org-per-user, a user-management/invite UI — these remain
   follow-ups, not silently dropped.
-- No automated test suite yet. This is a gap, not a decision — see Engineering &
-  Security Standards below.
+- A pytest suite (`backend/tests/`) now covers auth, RBAC, tenant isolation, the gap
+  state machine, and the action approval lifecycle — the security-critical paths
+  exercised by hand during the auth/RBAC pass. Still not covered: anything requiring
+  Claude API mocking (framework ingestion, evidence AI analysis, the chat agent's real
+  tool-calling loop, knowledge-base embeddings), integration vendor adapters, and CI
+  wiring (no `.github/workflows` yet) — these are gaps, not decisions.
 
 Treat the vision document's phases as the roadmap, but don't jump straight to Phase 4
 concepts (multi-agent split, autonomous remediation everywhere) before Phase 1-2
@@ -108,6 +112,20 @@ posture are product features, not implementation details.
 - **Audit everything that mutates state.** `AuditLog` already covers action
   approve/reject; extend that discipline to every new mutation (config changes,
   evidence submission, framework approval, integration setup) as those land.
+- **OWASP Top 10 is a baseline, checked on every change, not an occasional audit.**
+  Concretely for this stack: parameterized queries only, never raw SQL string
+  interpolation (A03 injection); every router/chat tool re-derives org/user from the
+  session rather than trusting a client-supplied ID (A01 broken access control,
+  ties back to the tenant-isolation rule above); no hand-rolled crypto, no secrets in
+  code (A02 cryptographic failures, A05 misconfiguration); validate and size-limit
+  every external input — uploaded documents, integration API responses, chat tool
+  arguments — before it crosses into application logic (A03/A04); dependencies kept
+  current and free of known CVEs (A06); auth/session handling stays in `app/auth.py`'s
+  reviewed pattern rather than ad hoc per-feature reinvention (A07); treat any new
+  deserialization, file upload, or webhook receiver as A08/A10-relevant and validate
+  accordingly. When a change touches auth, input parsing, file/URL handling, or
+  cross-tenant data access, call out which OWASP category applies in the same way the
+  IDOR fixes were called out during the auth/RBAC pass.
 - **AI actions respect the same RBAC and approval gates as a human would** — the chat
   agent's approve/reject guardrails (session-bound user identity, never an
   LLM-supplied parameter) are the model to follow for every new agentic capability:
@@ -116,10 +134,15 @@ posture are product features, not implementation details.
   must be traceable to the evidence and reasoning that produced it (see `ai_rationale`
   on `Finding`, `parameters.rationale` on `Action`) — never surface an AI conclusion
   without its basis. Never let a heuristic fallback present itself as AI-verified.
-- **Tests are a known gap.** There is currently no automated test suite. As features
-  stabilize, add tests rather than letting this gap grow — particularly around tenant
-  isolation, the scoring/gap state machine, and the action approval lifecycle, where a
-  regression would be a real customer-facing correctness or security issue.
+- **Tests guard the security-critical paths — keep extending them, don't let them rot.**
+  `backend/tests/` covers auth, RBAC (REST and chat, via `chat_agent._dispatch`), tenant
+  isolation (the three IDOR classes fixed during the auth pass), the gap state machine,
+  and the action approval lifecycle — confirmed to actually catch regressions (a
+  reverted IDOR fix was spot-checked to fail the corresponding test). Run
+  `backend/.venv/bin/pytest` against a real Postgres `grc_test` database (pgvector
+  columns rule out SQLite) before considering an auth/RBAC/tenant-isolation/state-machine
+  change done. As new agentic capabilities, integrations, or state machines land, add
+  tests in the same pass, not as a follow-up.
 - **Dependencies and input validation**: validate everything crossing a trust boundary
   (uploaded documents, integration API responses, chat tool inputs); keep dependencies
   current; don't disable security checks to move faster.

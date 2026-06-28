@@ -24,11 +24,11 @@ def list_actions(
     return query.all()
 
 
-def propose_action(db: Session, gap_id: uuid.UUID) -> models.Action:
+def propose_action(db: Session, organization_id: uuid.UUID, gap_id: uuid.UUID) -> models.Action:
     """AI proposes a remediation action for an open gap. Lands in
     pending_approval — nothing executes until an admin approves it."""
     gap = db.get(models.Gap, gap_id)
-    if gap is None:
+    if gap is None or gap.organization_id != organization_id:
         raise NotFoundError("Gap not found")
     if gap.status not in ACTIONABLE_GAP_STATUSES:
         raise ValidationError("Gap is not actionable")
@@ -61,9 +61,14 @@ def propose_action(db: Session, gap_id: uuid.UUID) -> models.Action:
     return action
 
 
-def approve_action(db: Session, action_id: uuid.UUID, user_id: uuid.UUID) -> models.Action:
+def approve_action(
+    db: Session, organization_id: uuid.UUID, action_id: uuid.UUID, user_id: uuid.UUID
+) -> models.Action:
     action = db.get(models.Action, action_id)
     if action is None:
+        raise NotFoundError("Action not found")
+    gap = db.get(models.Gap, action.gap_id)
+    if gap is None or gap.organization_id != organization_id:
         raise NotFoundError("Action not found")
     if action.status != "pending_approval":
         raise ValidationError("Action is not pending approval")
@@ -76,7 +81,6 @@ def approve_action(db: Session, action_id: uuid.UUID, user_id: uuid.UUID) -> mod
     action.status = "executing"
     db.flush()
 
-    gap = db.get(models.Gap, action.gap_id)
     result = adapters.execute_action(action)
     action.result = result
     action.executed_at = datetime.now(timezone.utc)
@@ -122,9 +126,14 @@ def approve_action(db: Session, action_id: uuid.UUID, user_id: uuid.UUID) -> mod
     return action
 
 
-def reject_action(db: Session, action_id: uuid.UUID, user_id: uuid.UUID) -> models.Action:
+def reject_action(
+    db: Session, organization_id: uuid.UUID, action_id: uuid.UUID, user_id: uuid.UUID
+) -> models.Action:
     action = db.get(models.Action, action_id)
     if action is None:
+        raise NotFoundError("Action not found")
+    gap = db.get(models.Gap, action.gap_id)
+    if gap is None or gap.organization_id != organization_id:
         raise NotFoundError("Action not found")
     if action.status != "pending_approval":
         raise ValidationError("Action is not pending approval")
@@ -136,7 +145,6 @@ def reject_action(db: Session, action_id: uuid.UUID, user_id: uuid.UUID) -> mode
     action.approved_by_user_id = user.id
     action.status = "rejected"
 
-    gap = db.get(models.Gap, action.gap_id)
     db.add(
         models.AuditLog(
             organization_id=gap.organization_id,

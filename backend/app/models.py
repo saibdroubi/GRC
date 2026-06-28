@@ -46,8 +46,21 @@ class User(Base):
     role: Mapped[str] = mapped_column(
         Enum("admin", "analyst", "owner", "viewer", name="user_role"), default="viewer"
     )
+    password_hash: Mapped[str] = mapped_column(String, nullable=False)
+    failed_login_attempts: Mapped[int] = mapped_column(default=0)
+    locked_until: Mapped[datetime | None] = mapped_column(nullable=True)
 
     organization: Mapped["Organization"] = relationship(back_populates="users")
+
+
+class Session(Base):
+    __tablename__ = "sessions"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
+    token_hash: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(nullable=False)
 
 
 class Framework(Base):

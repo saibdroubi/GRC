@@ -15,9 +15,13 @@ def list_gaps(db: Session, organization_id: uuid.UUID, status: str | None = None
     return query.all()
 
 
-def update_gap_status(db: Session, gap_id: uuid.UUID, new_status: str) -> models.Gap:
+def update_gap_status(
+    db: Session, organization_id: uuid.UUID, gap_id: uuid.UUID, new_status: str
+) -> models.Gap:
     gap = db.get(models.Gap, gap_id)
-    if gap is None:
+    # Don't distinguish "doesn't exist" from "belongs to another org" -- both
+    # return 404, so this can't be used to probe for other tenants' gap IDs.
+    if gap is None or gap.organization_id != organization_id:
         raise NotFoundError("Gap not found")
     if new_status not in VALID_GAP_STATUSES:
         raise ValidationError(f"Invalid status, must be one of {VALID_GAP_STATUSES}")

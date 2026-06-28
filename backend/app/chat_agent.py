@@ -2,14 +2,17 @@
 
 Wraps the same service-layer functions the REST routers call (app/services/*)
 as Anthropic tool-use tools, so chat and the dashboard never drift out of
-sync. Two hard guardrails enforced here, not just by prompting:
+sync. run_chat_turn is always called with the authenticated current_user
+(app/api/chat.py resolves it via app.auth.get_current_user and verifies the
+session belongs to them before this module ever runs) — three hard
+guardrails enforced here in code, not just by prompting:
 
-1. approve_action / reject_action tools take only an action_id — the
-   approving user's identity always comes from the chat session's user_id,
-   never an LLM-supplied parameter. The model cannot impersonate a different
-   approver.
-2. organization_id is always the chat session's organization_id, never a
-   tool parameter — the model cannot query or act on a different org.
+1. organization_id and the approving/acting user's identity always come from
+   that authenticated current_user, never an LLM-supplied tool parameter —
+   the model cannot query/act on a different org or impersonate another user.
+2. Every mutating tool is gated by the same role requirements as its REST
+   equivalent (_TOOL_ROLE_REQUIREMENTS, checked via app.permissions) — chat
+   cannot do anything a viewer/analyst couldn't do through the dashboard.
 
 Within those, the system prompt is what stops the model from calling
 approve/reject unless the human's latest message actually asked for it.
@@ -23,8 +26,9 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app.config import settings
-from app.errors import NotFoundError, ValidationError
+from app.errors import ForbiddenError, NotFoundError, ValidationError
 from app.evidence_pipeline import record_evidence
+from app.permissions import ADMIN_ROLES, WRITE_ROLES, require_role
 from app.serialization import to_jsonable
 from app.services import actions as actions_service
 from app.services import frameworks as frameworks_service
@@ -240,8 +244,28 @@ TOOL_DEFINITIONS = [
 ]
 
 
-def _dispatch(db: Session, session: models.ChatSession, name: str, tool_input: dict):
-    org_id = session.organization_id
+# Mirrors the REST routers' role gates exactly (app/api/*.py) -- this is the
+# part of the "chat can't bypass RBAC" guarantee that lives in code, not the
+# system prompt.
+_TOOL_ROLE_REQUIREMENTS = {
+    "update_gap_status": WRITE_ROLES,
+    "submit_evidence": WRITE_ROLES,
+    "propose_action": WRITE_ROLES,
+    "approve_action": ADMIN_ROLES,
+    "reject_action": ADMIN_ROLES,
+    "configure_integration": ADMIN_ROLES,
+    "test_integration_connection": ADMIN_ROLES,
+    "sync_integration_evidence": ADMIN_ROLES,
+    "save_to_knowledge_base": WRITE_ROLES,
+}
+
+
+def _dispatch(db: Session, actor: models.User, name: str, tool_input: dict):
+    org_id = actor.organization_id
+
+    required_roles = _TOOL_ROLE_REQUIREMENTS.get(name)
+    if required_roles is not None:
+        require_role(actor, required_roles)
 
     if name == "list_frameworks":
         return frameworks_service.list_frameworks(db)
@@ -257,7 +281,7 @@ def _dispatch(db: Session, session: models.ChatSession, name: str, tool_input: d
         return gaps_service.list_gaps(db, org_id, tool_input.get("status"))
     if name == "update_gap_status":
         return gaps_service.update_gap_status(
-            db, uuid.UUID(tool_input["gap_id"]), tool_input["new_status"]
+            db, org_id, uuid.UUID(tool_input["gap_id"]), tool_input["new_status"]
         )
     if name == "submit_evidence":
         return record_evidence(
@@ -268,14 +292,14 @@ def _dispatch(db: Session, session: models.ChatSession, name: str, tool_input: d
             extracted_facts={"status": tool_input["status"], "notes": tool_input["notes"]},
         )
     if name == "propose_action":
-        return actions_service.propose_action(db, uuid.UUID(tool_input["gap_id"]))
+        return actions_service.propose_action(db, org_id, uuid.UUID(tool_input["gap_id"]))
     if name == "approve_action":
         return actions_service.approve_action(
-            db, uuid.UUID(tool_input["action_id"]), session.user_id
+            db, org_id, uuid.UUID(tool_input["action_id"]), actor.id
         )
     if name == "reject_action":
         return actions_service.reject_action(
-            db, uuid.UUID(tool_input["action_id"]), session.user_id
+            db, org_id, uuid.UUID(tool_input["action_id"]), actor.id
         )
     if name == "list_integration_types":
         return integrations_service.list_types()
@@ -305,11 +329,11 @@ def _dispatch(db: Session, session: models.ChatSession, name: str, tool_input: d
     raise ValidationError(f"Unknown tool '{name}'")
 
 
-def _run_tool(db: Session, session: models.ChatSession, name: str, tool_input: dict) -> tuple[str, bool]:
+def _run_tool(db: Session, actor: models.User, name: str, tool_input: dict) -> tuple[str, bool]:
     try:
-        result = _dispatch(db, session, name, tool_input)
+        result = _dispatch(db, actor, name, tool_input)
         return json.dumps(to_jsonable(result)), False
-    except (NotFoundError, ValidationError) as e:
+    except (NotFoundError, ValidationError, ForbiddenError) as e:
         return str(e), True
     except Exception as e:  # vendor/integration errors, etc.
         return f"Unexpected error: {e}", True
@@ -376,11 +400,9 @@ def _save_message(db: Session, session_id: uuid.UUID, role: str, content: str, t
     return msg
 
 
-def run_chat_turn(db: Session, session_id: uuid.UUID, user_message: str) -> models.ChatMessage:
-    session = db.get(models.ChatSession, session_id)
-    if session is None:
-        raise NotFoundError("Chat session not found")
-
+def run_chat_turn(
+    db: Session, session_id: uuid.UUID, user_message: str, current_user: models.User
+) -> models.ChatMessage:
     client = _get_client()  # raises ChatNotConfigured before we touch the DB if unset
 
     anthropic_messages = _history_to_anthropic_messages(_load_history(db, session_id))
@@ -414,7 +436,7 @@ def run_chat_turn(db: Session, session_id: uuid.UUID, user_message: str) -> mode
 
         tool_results = []
         for t in tool_uses:
-            result_text, is_error = _run_tool(db, session, t.name, t.input)
+            result_text, is_error = _run_tool(db, current_user, t.name, t.input)
             _save_message(
                 db,
                 session_id,

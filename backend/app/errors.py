@@ -12,3 +12,11 @@ class NotFoundError(Exception):
 
 class ValidationError(Exception):
     pass
+
+
+class AuthenticationError(Exception):
+    pass
+
+
+class ForbiddenError(Exception):
+    pass

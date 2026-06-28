@@ -8,8 +8,11 @@ text and must be replaced by the real Framework Library ingestion pipeline
 against it.
 """
 
+from app import auth, models
 from app.database import SessionLocal
-from app import models
+
+DEV_ADMIN_EMAIL = "admin@example.com"
+DEV_ADMIN_PASSWORD = "dev-only-password-123"  # nosec: local dev seed data only, never a real credential
 
 
 def run() -> None:
@@ -26,8 +29,9 @@ def run() -> None:
         admin = models.User(
             organization_id=org.id,
             name="Dev Admin",
-            email="admin@example.com",
+            email=DEV_ADMIN_EMAIL,
             role="admin",
+            password_hash=auth.hash_password(DEV_ADMIN_PASSWORD),
         )
         db.add(admin)
 
@@ -104,6 +108,10 @@ def run() -> None:
         print(
             f"Seeded organization {org.id}, admin user {admin.id}, "
             f"and framework {framework.id} ({framework.name} {framework.version})"
+        )
+        print(
+            f"Dev login: {DEV_ADMIN_EMAIL} / {DEV_ADMIN_PASSWORD} "
+            "(local dev only -- never reuse this for a real account)"
         )
     finally:
         db.close()

@@ -71,8 +71,15 @@ and [backend/README.md](backend/README.md) for the service layer):
   standard — real framework ingestion (PDF → Claude extraction → admin-approved draft)
   is designed but not yet built.
 - No knowledge base / long-term memory layer yet (designed, not built).
-- No authentication, no real RBAC enforcement, no automated tests. These are gaps, not
-  decisions — see Engineering & Security Standards below.
+- Real authentication and RBAC are now in place: session-cookie auth with self-service
+  signup/login/logout (`app/auth.py`, `app/api/auth.py`), tenant/org always derived
+  from the authenticated session (never a client-supplied param), and a shared
+  `app/permissions.py::require_role` gate enforced identically by REST routers and the
+  chat agent. Still deferred: OIDC/SSO for enterprise buyers, email verification,
+  password reset, multi-org-per-user, a user-management/invite UI — these remain
+  follow-ups, not silently dropped.
+- No automated test suite yet. This is a gap, not a decision — see Engineering &
+  Security Standards below.
 
 Treat the vision document's phases as the roadmap, but don't jump straight to Phase 4
 concepts (multi-agent split, autonomous remediation everywhere) before Phase 1-2
@@ -92,12 +99,12 @@ posture are product features, not implementation details.
 - **No secrets in code, ever.** Integration credentials are encrypted at rest
   (`app/crypto.py`, Fernet, `SECRET_ENCRYPTION_KEY`) — keep that pattern for anything
   new that holds a credential. Master keys live in `.env`/secret managers, never in git.
-- **Auth is a known gap.** There is currently no real authentication — org/user
-  selection is a dev convenience (dropdowns), not a security boundary. Before any real
-  customer touches this, that needs to become proper auth (OIDC/SSO, since enterprise
-  buyers will require it) with RBAC enforced at the API layer, not just modeled in the
-  `User.role` column. Don't build features that assume the current dev-mode trust model
-  is permanent.
+- **Auth**: session-cookie based (`httpOnly`, `Secure`, `SameSite=Strict`), org/user are
+  always derived from the authenticated session server-side, never from a client-supplied
+  parameter. RBAC (`viewer`/`analyst`/`admin`/`owner`) is enforced at the API layer via
+  `app/permissions.py::require_role`, called identically from REST routers and the chat
+  agent's `_dispatch`. OIDC/SSO for enterprise buyers is still a deferred follow-up, not
+  yet built.
 - **Audit everything that mutates state.** `AuditLog` already covers action
   approve/reject; extend that discipline to every new mutation (config changes,
   evidence submission, framework approval, integration setup) as those land.

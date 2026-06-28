@@ -1,7 +1,28 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, EmailStr
+
+
+class SignupIn(BaseModel):
+    organization_name: str
+    name: str
+    email: EmailStr
+    password: str
+
+
+class LoginIn(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class CurrentUserOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    email: str
+    role: str
+    organization_id: uuid.UUID
+    organization_name: str
 
 
 class FrameworkOut(BaseModel):
@@ -32,7 +53,6 @@ class ControlOut(BaseModel):
 
 
 class EvidenceIn(BaseModel):
-    organization_id: uuid.UUID
     evidence_type: str
     control_hints: list[str] = []
     extracted_facts: dict = {}
@@ -113,11 +133,6 @@ class FrameworkScoreOut(BaseModel):
     score_pct: float
 
 
-class ChatSessionIn(BaseModel):
-    organization_id: uuid.UUID
-    user_id: uuid.UUID
-
-
 class ChatSessionOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -142,7 +157,6 @@ class ChatMessageOut(BaseModel):
 
 
 class KnowledgeBaseDocumentIn(BaseModel):
-    organization_id: uuid.UUID
     title: str
     content: str
     reformat: bool = False

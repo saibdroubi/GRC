@@ -1,51 +1,52 @@
 import { useEffect, useState } from "react";
-import { api, type Organization, type User } from "./api";
+import { api, type CurrentUser } from "./api";
 import Dashboard from "./Dashboard";
 import ChatPanel from "./ChatPanel";
+import Login from "./Login";
+import Signup from "./Signup";
 
 function App() {
-  const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [orgId, setOrgId] = useState<string>("");
-  const [users, setUsers] = useState<User[]>([]);
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [authView, setAuthView] = useState<"login" | "signup">("login");
   const [tab, setTab] = useState<"dashboard" | "chat">("dashboard");
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     api
-      .listOrganizations()
-      .then((orgs) => {
-        setOrganizations(orgs);
-        if (orgs.length) setOrgId(orgs[0].id);
-      })
-      .catch((e) => setError(String(e)));
+      .getCurrentUser()
+      .then(setCurrentUser)
+      .catch(() => setCurrentUser(null))
+      .finally(() => setAuthChecked(true));
   }, []);
 
-  useEffect(() => {
-    if (!orgId) return;
-    api.listUsers(orgId).then(setUsers).catch((e) => setError(String(e)));
-  }, [orgId]);
+  const handleLogout = async () => {
+    await api.logout();
+    setCurrentUser(null);
+    setAuthView("login");
+  };
 
-  const adminUserId = users.find((u) => u.role === "admin")?.id ?? users[0]?.id;
+  if (!authChecked) return null;
+
+  if (!currentUser) {
+    return authView === "login" ? (
+      <Login onAuthenticated={setCurrentUser} onSwitchToSignup={() => setAuthView("signup")} />
+    ) : (
+      <Signup onAuthenticated={setCurrentUser} onSwitchToLogin={() => setAuthView("login")} />
+    );
+  }
 
   return (
     <div className="page">
       <header>
         <h1>GRC Dashboard</h1>
-        <div className="selectors">
-          <label>
-            Organization
-            <select value={orgId} onChange={(e) => setOrgId(e.target.value)}>
-              {organizations.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.name}
-                </option>
-              ))}
-            </select>
-          </label>
+        <div className="user-info">
+          <span className="org-name">{currentUser.organization_name}</span>
+          <span className="empty">
+            {currentUser.name} ({currentUser.role})
+          </span>
+          <button onClick={handleLogout}>Log out</button>
         </div>
       </header>
-
-      {error && <p className="error">{error}</p>}
 
       <div className="tabs">
         <button
@@ -59,10 +60,8 @@ function App() {
         </button>
       </div>
 
-      {tab === "dashboard" && orgId && <Dashboard orgId={orgId} />}
-      {tab === "chat" && orgId && adminUserId && (
-        <ChatPanel orgId={orgId} userId={adminUserId} />
-      )}
+      {tab === "dashboard" && <Dashboard />}
+      {tab === "chat" && <ChatPanel />}
     </div>
   );
 }

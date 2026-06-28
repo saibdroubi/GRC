@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, type ChatMessage, type ChatSession } from "./api";
 
-export default function ChatPanel({ orgId, userId }: { orgId: string; userId: string }) {
+export default function ChatPanel() {
   const [session, setSession] = useState<ChatSession | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -10,18 +10,17 @@ export default function ChatPanel({ orgId, userId }: { orgId: string; userId: st
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!orgId || !userId) return;
     api
-      .listChatSessions(orgId)
+      .listChatSessions()
       .then((sessions) => {
         if (sessions.length) {
           setSession(sessions[0]);
         } else {
-          return api.createChatSession(orgId, userId).then(setSession);
+          return api.createChatSession().then(setSession);
         }
       })
       .catch((e) => setError(String(e)));
-  }, [orgId, userId]);
+  }, []);
 
   useEffect(() => {
     if (!session) return;
@@ -34,7 +33,7 @@ export default function ChatPanel({ orgId, userId }: { orgId: string; userId: st
 
   const handleNewSession = async () => {
     setError(null);
-    const s = await api.createChatSession(orgId, userId);
+    const s = await api.createChatSession();
     setSession(s);
     setMessages([]);
   };

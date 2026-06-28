@@ -1,8 +1,15 @@
-const BASE_URL = "http://127.0.0.1:8000";
+// Must be host-aligned with the frontend origin (both "localhost") so the
+// SameSite=Strict session cookie counts as same-site and is actually sent;
+// "127.0.0.1" and "localhost" are different sites even on the same machine.
+const BASE_URL = "http://localhost:8000";
 
-export interface Organization {
+export interface CurrentUser {
   id: string;
   name: string;
+  email: string;
+  role: string;
+  organization_id: string;
+  organization_name: string;
 }
 
 export interface Framework {
@@ -48,13 +55,6 @@ export interface Gap {
   status: string;
 }
 
-export interface User {
-  id: string;
-  name: string;
-  email: string;
-  role: string;
-}
-
 export interface Action {
   id: string;
   gap_id: string;
@@ -93,14 +93,18 @@ export interface ChatMessage {
 }
 
 async function getJson<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`);
-  if (!res.ok) throw new Error(`${path} failed: ${res.status}`);
+  const res = await fetch(`${BASE_URL}${path}`, { credentials: "include" });
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => null);
+    throw new Error(errBody?.detail ?? `${path} failed: ${res.status}`);
+  }
   return res.json();
 }
 
-async function postJson<T>(path: string, body?: unknown): Promise<T> {
+async function sendJson<T>(path: string, method: string, body?: unknown): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
-    method: "POST",
+    method,
+    credentials: "include",
     headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
@@ -111,49 +115,38 @@ async function postJson<T>(path: string, body?: unknown): Promise<T> {
   return res.json();
 }
 
+const postJson = <T>(path: string, body?: unknown) => sendJson<T>(path, "POST", body);
+
 export const api = {
-  listOrganizations: () => getJson<Organization[]>("/organizations"),
+  signup: (organizationName: string, name: string, email: string, password: string) =>
+    postJson<CurrentUser>("/auth/signup", {
+      organization_name: organizationName,
+      name,
+      email,
+      password,
+    }),
+  login: (email: string, password: string) => postJson<CurrentUser>("/auth/login", { email, password }),
+  logout: () => postJson<{ status: string }>("/auth/logout"),
+  getCurrentUser: () => getJson<CurrentUser>("/auth/me"),
+
   listFrameworks: () => getJson<Framework[]>("/frameworks"),
-  getFrameworkScore: (frameworkId: string, organizationId: string) =>
-    getJson<FrameworkScore>(
-      `/frameworks/${frameworkId}/score?organization_id=${organizationId}`
-    ),
-  listControlsWithStatus: (frameworkId: string, organizationId: string) =>
-    getJson<ControlWithStatus[]>(
-      `/frameworks/${frameworkId}/controls-with-status?organization_id=${organizationId}`
-    ),
-  listGaps: (organizationId: string) =>
-    getJson<Gap[]>(`/gaps?organization_id=${organizationId}`),
-  updateGapStatus: async (gapId: string, newStatus: string) => {
-    const res = await fetch(
-      `${BASE_URL}/gaps/${gapId}?new_status=${newStatus}`,
-      { method: "PATCH" }
-    );
-    if (!res.ok) throw new Error(`update gap failed: ${res.status}`);
-    return res.json();
-  },
-  listUsers: (organizationId: string) =>
-    getJson<User[]>(`/users?organization_id=${organizationId}`),
-  listActions: (organizationId: string) =>
-    getJson<Action[]>(`/actions?organization_id=${organizationId}`),
-  proposeAction: (gapId: string) =>
-    postJson<Action>(`/gaps/${gapId}/actions`),
-  approveAction: (actionId: string, userId: string) =>
-    postJson<Action>(`/actions/${actionId}/approve?user_id=${userId}`),
-  rejectAction: (actionId: string, userId: string) =>
-    postJson<Action>(`/actions/${actionId}/reject?user_id=${userId}`),
-  listIntegrations: (organizationId: string) =>
-    getJson<IntegrationStatus[]>(`/integrations?organization_id=${organizationId}`),
-  syncIntegrationEvidence: (organizationId: string, type: string, controlId: string) =>
-    postJson<unknown>(
-      `/integrations/${type}/sync?organization_id=${organizationId}&control_id=${controlId}`
-    ),
-  createChatSession: (organizationId: string, userId: string) =>
-    postJson<ChatSession>("/chat/sessions", { organization_id: organizationId, user_id: userId }),
-  listChatSessions: (organizationId: string) =>
-    getJson<ChatSession[]>(`/chat/sessions?organization_id=${organizationId}`),
-  listChatMessages: (sessionId: string) =>
-    getJson<ChatMessage[]>(`/chat/sessions/${sessionId}/messages`),
+  getFrameworkScore: (frameworkId: string) =>
+    getJson<FrameworkScore>(`/frameworks/${frameworkId}/score`),
+  listControlsWithStatus: (frameworkId: string) =>
+    getJson<ControlWithStatus[]>(`/frameworks/${frameworkId}/controls-with-status`),
+  listGaps: () => getJson<Gap[]>("/gaps"),
+  updateGapStatus: (gapId: string, newStatus: string) =>
+    sendJson<Gap>(`/gaps/${gapId}?new_status=${newStatus}`, "PATCH"),
+  listActions: () => getJson<Action[]>("/actions"),
+  proposeAction: (gapId: string) => postJson<Action>(`/gaps/${gapId}/actions`),
+  approveAction: (actionId: string) => postJson<Action>(`/actions/${actionId}/approve`),
+  rejectAction: (actionId: string) => postJson<Action>(`/actions/${actionId}/reject`),
+  listIntegrations: () => getJson<IntegrationStatus[]>("/integrations"),
+  syncIntegrationEvidence: (type: string, controlId: string) =>
+    postJson<unknown>(`/integrations/${type}/sync?control_id=${controlId}`),
+  createChatSession: () => postJson<ChatSession>("/chat/sessions"),
+  listChatSessions: () => getJson<ChatSession[]>("/chat/sessions"),
+  listChatMessages: (sessionId: string) => getJson<ChatMessage[]>(`/chat/sessions/${sessionId}/messages`),
   postChatMessage: (sessionId: string, content: string) =>
     postJson<ChatMessage>(`/chat/sessions/${sessionId}/messages`, { content }),
 };

@@ -7,7 +7,6 @@ import {
   type FrameworkScore,
   type Gap,
   type IntegrationStatus,
-  type User,
 } from "./api";
 
 const MFA_KEYWORDS = ["multi-factor", "mfa", "conditional access"];
@@ -37,14 +36,13 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-export default function Dashboard({ orgId }: { orgId: string }) {
+export default function Dashboard() {
   const [frameworks, setFrameworks] = useState<Framework[]>([]);
   const [frameworkId, setFrameworkId] = useState<string>("");
   const [score, setScore] = useState<FrameworkScore | null>(null);
   const [controls, setControls] = useState<ControlWithStatus[]>([]);
   const [gaps, setGaps] = useState<Gap[]>([]);
   const [actions, setActions] = useState<Action[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
   const [integrations, setIntegrations] = useState<IntegrationStatus[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
@@ -54,47 +52,37 @@ export default function Dashboard({ orgId }: { orgId: string }) {
       setFrameworks(fws);
       if (fws.length) setFrameworkId(fws[0].id);
     }).catch((e) => setError(String(e)));
+    api.listIntegrations().then(setIntegrations).catch((e) => setError(String(e)));
   }, []);
 
-  useEffect(() => {
-    if (!orgId) return;
-    api.listUsers(orgId).then(setUsers).catch((e) => setError(String(e)));
-    api.listIntegrations(orgId).then(setIntegrations).catch((e) => setError(String(e)));
-  }, [orgId]);
-
   const refresh = () => {
-    if (!orgId || !frameworkId) return;
-    api.getFrameworkScore(frameworkId, orgId).then(setScore).catch((e) => setError(String(e)));
-    api.listControlsWithStatus(frameworkId, orgId).then(setControls).catch((e) => setError(String(e)));
-    api.listGaps(orgId).then(setGaps).catch((e) => setError(String(e)));
-    api.listActions(orgId).then(setActions).catch((e) => setError(String(e)));
+    if (!frameworkId) return;
+    api.getFrameworkScore(frameworkId).then(setScore).catch((e) => setError(String(e)));
+    api.listControlsWithStatus(frameworkId).then(setControls).catch((e) => setError(String(e)));
+    api.listGaps().then(setGaps).catch((e) => setError(String(e)));
+    api.listActions().then(setActions).catch((e) => setError(String(e)));
   };
 
-  useEffect(refresh, [orgId, frameworkId]);
+  useEffect(refresh, [frameworkId]);
 
-  const handleGapStatus = async (gapId: string, newStatus: string) => {
-    await api.updateGapStatus(gapId, newStatus);
-    refresh();
+  const withErrorHandling = (fn: () => Promise<unknown>) => async () => {
+    setError(null);
+    try {
+      await fn();
+      refresh();
+    } catch (e) {
+      setError(String((e as Error).message ?? e));
+    }
   };
 
-  const adminUserId = users.find((u) => u.role === "admin")?.id ?? users[0]?.id;
+  const handleGapStatus = (gapId: string, newStatus: string) =>
+    withErrorHandling(() => api.updateGapStatus(gapId, newStatus))();
 
-  const handlePropose = async (gapId: string) => {
-    await api.proposeAction(gapId);
-    refresh();
-  };
+  const handlePropose = (gapId: string) => withErrorHandling(() => api.proposeAction(gapId))();
 
-  const handleApprove = async (actionId: string) => {
-    if (!adminUserId) return;
-    await api.approveAction(actionId, adminUserId);
-    refresh();
-  };
+  const handleApprove = (actionId: string) => withErrorHandling(() => api.approveAction(actionId))();
 
-  const handleReject = async (actionId: string) => {
-    if (!adminUserId) return;
-    await api.rejectAction(actionId, adminUserId);
-    refresh();
-  };
+  const handleReject = (actionId: string) => withErrorHandling(() => api.rejectAction(actionId))();
 
   const latestActionForGap = (gapId: string): Action | undefined => {
     const forGap = actions.filter((a) => a.gap_id === gapId);
@@ -107,9 +95,9 @@ export default function Dashboard({ orgId }: { orgId: string }) {
     setSyncMessage(null);
     setError(null);
     try {
-      await api.syncIntegrationEvidence(orgId, "m365", controlId);
+      await api.syncIntegrationEvidence("m365", controlId);
       setSyncMessage("Synced live Conditional Access data from Microsoft 365.");
-      api.listIntegrations(orgId).then(setIntegrations);
+      api.listIntegrations().then(setIntegrations);
       refresh();
     } catch (e) {
       setError(String((e as Error).message ?? e));
